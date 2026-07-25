@@ -1,4 +1,4 @@
-name: Build Android APK
+Build Android APK
 
 on:
   push:
@@ -34,5 +34,6 @@ jobs:
         with:
           name: BinZaid-Game-APK
           path: build/app/outputs/flutter-apk/app-release.apk
+
 
           
