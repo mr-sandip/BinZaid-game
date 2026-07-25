@@ -1,595 +1,305 @@
-import 'dart:math';
 import 'package:flutter/material.dart';
 
 void main() {
-  runApp(const BinzaidGameApp());
+  runApp(const BaghaBajariApp());
 }
 
-class BinzaidGameApp extends StatelessWidget {
-  const BinzaidGameApp({super.key});
+class BaghaBajariApp extends StatelessWidget {
+  const BaghaBajariApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Binzaid - Baraha',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        primarySwatch: Colors.brown,
-        scaffoldBackgroundColor: const Color(0xFFF4ECD8),
-      ),
-      home: const GameModeScreen(),
+      title: 'Bagha Bajari',
+      theme: ThemeData(primarySwatch: Colors.orange),
+      home: const GameScreen(),
     );
   }
 }
 
-// ==========================================
-// 1. GAME MODE SELECTION SCREEN
-// ==========================================
-class GameModeScreen extends StatelessWidget {
-  const GameModeScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Binzaid (Baraha Game)'),
-        centerTitle: true,
-        backgroundColor: Colors.brown[700],
-        foregroundColor: Colors.white,
-      ),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.pets, size: 80, color: Colors.brown),
-              const SizedBox(height: 20),
-              const Text(
-                'Choose Game Mode',
-                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.brown),
-              ),
-              const SizedBox(height: 40),
-              ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.brown[600],
-                  foregroundColor: Colors.white,
-                  minimumSize: const Size(double.infinity, 50),
-                ),
-                icon: const Icon(Icons.people),
-                label: const Text('2 Player (Pass & Play)', style: TextStyle(fontSize: 18)),
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const GameScreen(isVsBot: false, botDifficulty: 'Easy'),
-                    ),
-                  );
-                },
-              ),
-              const SizedBox(height: 20),
-              ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.brown[800],
-                  foregroundColor: Colors.white,
-                  minimumSize: const Size(double.infinity, 50),
-                ),
-                icon: const Icon(Icons.smart_toy),
-                label: const Text('Play vs Bot', style: TextStyle(fontSize: 18)),
-                onPressed: () {
-                  _showDifficultyDialog(context);
-                },
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _showDifficultyDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Select Bot Difficulty'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: ['Easy', 'Medium', 'Hard'].map((level) {
-            return ListTile(
-              title: Text(level),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => GameScreen(isVsBot: true, botDifficulty: level),
-                  ),
-                );
-              },
-            );
-          }).toList(),
-        ),
-      ),
-    );
-  }
-}
-
-// ==========================================
-// 2. CORE GAMEPLAY SCREEN
-// ==========================================
 class GameScreen extends StatefulWidget {
-  final bool isVsBot;
-  final String botDifficulty;
-
-  const GameScreen({super.key, required this.isVsBot, required this.botDifficulty});
+  const GameScreen({super.key});
 
   @override
   State<GameScreen> createState() => _GameScreenState();
 }
 
-class _GameScreenState extends State<GameScreen> {
-  // Board dimensions: 5x5 grid -> 25 points indexed 0 to 24
-  // Phase 1: Placing Tigers (4 tigers to place)
-  // Phase 2: Placing Goats (20 goats to place one by one)
-  // Phase 3: Moving pieces (Tigers move, Goats move)
-  
-  String gamePhase = 'PLACE_TIGERS'; // 'PLACE_TIGERS', 'PLACE_GOATS', 'MOVE'
-  String turn = 'TIGER'; // 'TIGER' or 'GOAT'
-  
-  late List<String?> board; // 'T' for Tiger, 'G' for Goat, null for empty
-  int tigersToPlace = 4;
-  int goatsToPlace = 20;
-  int goatsEaten = 0;
-  
-  int? selectedIndex;
-  String message = 'Place 4 Tigers on the 4 corners of the board.';
-  
-  // For repeat detection (Draw condition)
-  final List<String> boardHistory = [];
+enum GamePhase { placingTigers, placingGoats, playing }
+enum Piece { empty, tiger, goat }
 
-  @override
-  void initState() {
-    super.initState();
-    resetGame();
+class _GameScreenState extends State<GameScreen> {
+  // Board setup: 5x5 grid (25 positions)
+  List<Piece> board = List.generate(25, (_) => Piece.empty);
+
+  GamePhase currentPhase = GamePhase.placingTigers;
+  bool isTigerTurn = true;
+
+  int tigersPlaced = 0;
+  int goatsPlaced = 0;
+  int selectedIndex = -1;
+
+  String statusMessage = "ବାଘର ପାଳି: ୪ଟି ବାଘ ଗୁଟି ବୋର୍ଡରେ ରଖନ୍ତୁ।";
+
+  // For 10-Move Draw detection
+  List<String> moveHistory = [];
+  bool isDraw = false;
+  String winner = "";
+
+  // Adjacency Graph for 5x5 Grid
+  final Map<int, List<int>> neighbors = {
+    0: [1, 5, 6],
+    1: [0, 2, 6],
+    2: [1, 3, 6, 7, 8],
+    3: [2, 4, 8],
+    4: [3, 8, 9],
+    5: [0, 6, 10],
+    6: [0, 1, 2, 5, 7, 10, 11, 12],
+    7: [2, 6, 8, 12],
+    8: [2, 3, 4, 7, 9, 12, 13, 14],
+    9: [4, 8, 14],
+    10: [5, 6, 11, 15, 16],
+    11: [6, 10, 12, 16],
+    12: [6, 7, 8, 11, 13, 16, 17, 18],
+    13: [8, 12, 14, 18],
+    14: [8, 9, 13, 18, 19],
+    15: [10, 16, 20],
+    16: [10, 11, 12, 15, 17, 20, 21, 22],
+    17: [12, 16, 18, 22],
+    18: [12, 13, 14, 17, 19, 22, 23, 24],
+    19: [14, 18, 24],
+    20: [15, 16, 21],
+    21: [16, 20, 22],
+    22: [16, 17, 18, 21, 23],
+    23: [18, 22, 24],
+    24: [18, 19, 23],
+  };
+
+  void handleTap(int index) {
+    if (winner.isNotEmpty || isDraw) return;
+
+    setState(() {
+      // Phase 1: Placing Tigers (4 Tigers)
+      if (currentPhase == GamePhase.placingTigers) {
+        if (board[index] == Piece.empty) {
+          board[index] = Piece.tiger;
+          tigersPlaced++;
+          if (tigersPlaced == 4) {
+            currentPhase = GamePhase.placingGoats;
+            statusMessage = "ଛେଳିର ପାଳି: ୪ଟି ଛେଳି ଗୁଟି ବୋର୍ଡରେ ରଖନ୍ତୁ।";
+          }
+        }
+      }
+      // Phase 2: Placing Goats (4 Goats)
+      else if (currentPhase == GamePhase.placingGoats) {
+        if (board[index] == Piece.empty) {
+          board[index] = Piece.goat;
+          goatsPlaced++;
+          if (goatsPlaced == 4) {
+            currentPhase = GamePhase.playing;
+            isTigerTurn = true;
+            statusMessage = "ଖେଳ ଆରମ୍ଭ! ବାଘର ପାଳି (ଗୁଟି ଘୁଞ୍ଚାନ୍ତୁ)।";
+          }
+        }
+      }
+      // Phase 3: Movement & Playing Phase
+      else if (currentPhase == GamePhase.playing) {
+        if (selectedIndex == -1) {
+          // Select piece
+          if (isTigerTurn && board[index] == Piece.tiger) {
+            selectedIndex = index;
+          } else if (!isTigerTurn && board[index] == Piece.goat) {
+            selectedIndex = index;
+          }
+        } else {
+          // Try to move selected piece to 'index'
+          if (index == selectedIndex) {
+            selectedIndex = -1; // Deselect
+          } else if (board[index] == Piece.empty) {
+            bool moved = false;
+
+            // Simple Neighbor Move
+            if (neighbors[selectedIndex]!.contains(index)) {
+              board[index] = board[selectedIndex];
+              board[selectedIndex] = Piece.empty;
+              moved = true;
+            }
+            // Tiger Jump & Eat Goat Move
+            else if (isTigerTurn && canTigerJump(selectedIndex, index)) {
+              int jumpedGoatIndex = getMiddleIndex(selectedIndex, index);
+              board[index] = Piece.tiger;
+              board[selectedIndex] = Piece.empty;
+              board[jumpedGoatIndex] = Piece.empty; // Eat Goat
+              moved = true;
+            }
+
+            if (moved) {
+              selectedIndex = -1;
+              recordMoveAndCheckDraw();
+
+              // Check Win Conditions
+              if (!board.contains(Piece.goat)) {
+                winner = "ବାଘ ଜିତିଗଲା! (ସବୁ ଛେଳି କଟିଗଲେ)";
+                statusMessage = winner;
+              } else if (isTigersTrapped()) {
+                winner = "ଛେଳି ଜିତିଗଲେ! (ବାଘ ବାନ୍ଧି ହୋଇଗଲା)";
+                statusMessage = winner;
+              } else {
+                isTigerTurn = !isTigerTurn;
+                statusMessage = isTigerTurn
+                    ? "ବାଘର ପାଳି (ଗୁଟି ଘୁଞ୍ଚାନ୍ତୁ)"
+                    : "ଛେଳିର ପାଳି (ଗୁଟି ଘୁଞ୍ଚାନ୍ତୁ)";
+              }
+            }
+          }
+        }
+      }
+    });
+  }
+
+  bool canTigerJump(int from, int to) {
+    int r1 = from ~/ 5, c1 = from % 5;
+    int r2 = to ~/ 5, c2 = to % 5;
+
+    int dr = r2 - r1;
+    int dc = c2 - c1;
+
+    // Check straight or diagonal jump of distance 2
+    if ((dr.abs() == 2 && dc == 0) ||
+        (dr == 0 && dc.abs() == 2) ||
+        (dr.abs() == 2 && dc.abs() == 2)) {
+      int midR = r1 + dr ~/ 2;
+      int midC = c1 + dc ~/ 2;
+      int midIndex = midR * 5 + midC;
+
+      return board[midIndex] == Piece.goat;
+    }
+    return false;
+  }
+
+  int getMiddleIndex(int from, int to) {
+    int r1 = from ~/ 5, c1 = from % 5;
+    int r2 = to ~/ 5, c2 = to % 5;
+    int midR = r1 + (r2 - r1) ~/ 2;
+    int midC = c1 + (c2 - c1) ~/ 2;
+    return midR * 5 + midC;
+  }
+
+  bool isTigersTrapped() {
+    for (int i = 0; i < 25; i++) {
+      if (board[i] == Piece.tiger) {
+        // Check normal moves
+        for (int n in neighbors[i]!) {
+          if (board[n] == Piece.empty) return false;
+        }
+        // Check jump moves
+        for (int target = 0; target < 25; target++) {
+          if (board[target] == Piece.empty && canTigerJump(i, target)) {
+            return false;
+          }
+        }
+      }
+    }
+    return true; // All tigers trapped
+  }
+
+  void recordMoveAndCheckDraw() {
+    String currentBoardState = board.map((e) => e.name).join();
+    moveHistory.add(currentBoardState);
+
+    int occurrences =
+        moveHistory.where((state) => state == currentBoardState).length;
+    if (occurrences >= 10) {
+      isDraw = true;
+      statusMessage = "ଗେମ୍ Draw ହୋଇଗଲା! (୧୦ ଥର Move Repeat ହେଲା)";
+    }
   }
 
   void resetGame() {
     setState(() {
-      board = List.filled(25, null);
-      gamePhase = 'PLACE_TIGERS';
-      turn = 'TIGER';
-      tigersToPlace = 4;
-      goatsToPlace = 20;
-      goatsEaten = 0;
-      selectedIndex = null;
-      message = 'Tiger's Turn: Place 4 Tigers on board corners.';
-      boardHistory.clear();
+      board = List.generate(25, (_) => Piece.empty);
+      currentPhase = GamePhase.placingTigers;
+      isTigerTurn = true;
+      tigersPlaced = 0;
+      goatsPlaced = 0;
+      selectedIndex = -1;
+      moveHistory.clear();
+      isDraw = false;
+      winner = "";
+      statusMessage = "ବାଘର ପାଳି: ୪ଟି ବାଘ ଗୁଟି ବୋର୍ଡରେ ରଖନ୍ତୁ।";
     });
-  }
-
-  // Define valid graph connections for 5x5 board grid + diagonals on specific nodes
-  List<int> getNeighbors(int index) {
-    List<int> neighbors = [];
-    int row = index ~/ 5;
-    int col = index % 5;
-
-    // Orthogonal movements
-    if (row > 0) neighbors.add(index - 5);
-    if (row < 4) neighbors.add(index + 5);
-    if (col > 0) neighbors.add(index - 1);
-    if (col < 4) neighbors.add(index + 1);
-
-    // Diagonal movements enabled on specific nodes (Standard Baraha rules: center, corners, middle nodes)
-    // Even indices / central diagonals pattern
-    if ((row + col) % 2 == 0) {
-      if (row > 0 && col > 0) neighbors.add(index - 6);
-      if (row > 0 && col < 4) neighbors.add(index - 4);
-      if (row < 4 && col > 0) neighbors.add(index + 4);
-      if (row < 4 && col < 4) neighbors.add(index + 6);
-    }
-
-    return neighbors;
-  }
-
-  bool isValidJump(int from, int to) {
-    int r1 = from ~/ 5, c1 = from % 5;
-    int r2 = to ~/ 5, c2 = to % 5;
-    int midR = (r1 + r2) ~/ 2;
-    int midC = (c1 + c2) ~/ 2;
-    int midIndex = midR * 5 + midC;
-
-    // Check if middle point contains a goat and destination is empty
-    if (board[midIndex] == 'G' && board[to] == null) {
-      // Check if straight line or valid diagonal exists between from, mid, and to
-      List<int> neighborsFrom = getNeighbors(from);
-      List<int> neighborsMid = getNeighbors(midIndex);
-      if (neighborsFrom.contains(midIndex) && neighborsMid.contains(to)) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  void handleCellTap(int index) {
-    if (checkWinConditions()) return;
-
-    // If playing vs Bot and it's Goat turn (and user plays Tiger), ignore tap
-    if (widget.isVsBot && turn == 'GOAT' && gamePhase != 'PLACE_GOATS') {
-      return;
-    }
-
-    setState(() {
-      if (gamePhase == 'PLACE_TIGERS') {
-        // Must place on corners: 0, 4, 20, 24
-        List<int> corners = [0, 4, 20, 24];
-        if (corners.contains(index) && board[index] == null) {
-          board[index] = 'T';
-          tigersToPlace--;
-          if (tigersToPlace == 0) {
-            gamePhase = 'PLACE_GOATS';
-            turn = 'GOAT';
-            message = 'Goat's Turn: Place 20 Goats on empty spots.';
-          } else {
-            message = 'Place remaining Tigers on corners ($tigersToPlace left).';
-          }
-        } else {
-          message = 'Tigers must be placed on board corners!';
-        }
-      } 
-      else if (gamePhase == 'PLACE_GOATS') {
-        if (board[index] == null) {
-          board[index] = 'G';
-          goatsToPlace--;
-          if (goatsToPlace == 0) {
-            gamePhase = 'MOVE';
-            turn = 'TIGER';
-            message = 'All goats placed! Tiger's turn to move.';
-          } else {
-            turn = (turn == 'TIGER') ? 'GOAT' : 'TIGER';
-            message = 'Goat placed. Goats left: $goatsToPlace';
-          }
-          checkWinConditions();
-          if (!widget.isVsBot && gamePhase == 'MOVE' && turn == 'GOAT') {
-            // Switch turns handled
-          }
-        } else {
-          message = 'Spot already occupied!';
-        }
-      } 
-      else if (gamePhase == 'MOVE') {
-        if (selectedIndex == null) {
-          // Select piece
-          if (board[index] == (turn == 'TIGER' ? 'T' : 'G')) {
-            selectedIndex = index;
-            message = 'Piece selected. Tap adjacent empty spot or jump over goat.';
-          } else {
-            message = 'Select your own piece (${turn == 'TIGER' ? 'Tiger' : 'Goat'}).';
-          }
-        } else {
-          // Move piece
-          int from = selectedIndex!;
-          if (from == index) {
-            selectedIndex = null;
-            message = 'Deselected.';
-            return;
-          }
-
-          if (turn == 'TIGER') {
-            // Tiger move or jump
-            List<int> neighbors = getNeighbors(from);
-            if (neighbors.contains(index) && board[index] == null) {
-              // Normal move
-              board[index] = 'T';
-              board[from] = null;
-              endTurnAfterMove();
-            } else if (isValidJump(from, index)) {
-              // Jump/Eat move
-              int midR = ((from ~/ 5) + (index ~/ 5)) ~/ 2;
-              int midC = ((from % 5) + (index % 5)) ~/ 2;
-              int midIndex = midR * 5 + midC;
-
-              board[index] = 'T';
-              board[from] = null;
-              board[midIndex] = null;
-              goatsEaten++;
-              
-              selectedIndex = index; // Allow consecutive jumps if possible
-              message = 'Ate a goat! Jump again or tap another piece.';
-              
-              if (checkWinConditions()) return;
-              
-              // If no further jumps possible, switch turn
-              if (!_canTigerJumpAnywhere(index)) {
-                endTurnAfterMove();
-              }
-            } else {
-              message = 'Invalid move for Tiger.';
-            }
-          } else {
-            // Goat move
-            List<int> neighbors = getNeighbors(from);
-            if (neighbors.contains(index) && board[index] == null) {
-              board[index] = 'G';
-              board[from] = null;
-              endTurnAfterMove();
-            } else {
-              message = 'Goats can only move to adjacent empty spots.';
-            }
-          }
-        }
-      }
-    });
-
-    // Trigger Bot Move if applicable
-    if (widget.isVsBot && !checkWinConditions() && turn == 'GOAT' && gamePhase == 'MOVE') {
-      Future.delayed(const Duration(milliseconds: 600), () => executeBotMove());
-    }
-  }
-
-  bool _canTigerJumpAnywhere(int tigerIndex) {
-    for (int neighbor in getNeighbors(tigerIndex)) {
-      int r1 = tigerIndex ~/ 5, c1 = tigerIndex % 5;
-      int r2 = neighbor ~/ 5, c2 = neighbor % 5;
-      int jumpTargetR = r2 + (r2 - r1);
-      int jumpTargetC = c2 + (c2 - c1);
-      if (jumpTargetR >= 0 && jumpTargetR < 5 && jumpTargetC >= 0 && jumpTargetC < 5) {
-        int targetIndex = jumpTargetR * 5 + jumpTargetC;
-        if (board[neighbor] == 'G' && board[targetIndex] == null) {
-          return true;
-        }
-      }
-    }
-    return false;
-  }
-
-  void endTurnAfterMove() {
-    selectedIndex = null;
-    turn = (turn == 'TIGER') ? 'GOAT' : 'TIGER';
-    message = '${turn == 'TIGER' ? "Tiger" : "Goat"}'s Turn';
-    
-    // Record board state for repeat detection (Draw condition)
-    String boardState = board.join();
-    boardHistory.add(boardState);
-    if (boardHistory.where((state) => state == boardState).length >= 10) {
-      _showEndDialog('Draw! Position repeated 10 times.');
-      return;
-    }
-
-    checkWinConditions();
-  }
-
-  bool checkWinConditions() {
-    // Condition 1: Tigers win if they eat 5 goats
-    if (goatsEaten >= 5) {
-      _showEndDialog('Tigers Win by eating 5 goats!');
-      return true;
-    }
-
-    // Condition 2: Goats win if all tigers are blocked and have no moves
-    if (gamePhase == 'MOVE' && turn == 'TIGER') {
-      if (isAllTigersBlocked()) {
-        _showEndDialog('Goats Win! All Tigers are blocked.');
-        return true;
-      }
-    }
-    return false;
-  }
-
-  bool isAllTigersBlocked() {
-    for (int i = 0; i < 25; i++) {
-      if (board[i] == 'T') {
-        // Check standard neighbors
-        for (int n in getNeighbors(i)) {
-          if (board[n] == null) return false;
-        }
-        // Check jump moves
-        if (_canTigerJumpAnywhere(i)) return false;
-      }
-    }
-    return true;
-  }
-
-  // ==========================================
-  // 3. BOT AI LOGIC (Easy, Medium, Hard)
-  // ==========================================
-  void executeBotMove() {
-    if (gamePhase == 'PLACE_GOATS') {
-      // Bot places goat on random empty spot
-      List<int> emptySpots = [];
-      for (int i = 0; i < 25; i++) {
-        if (board[i] == null) emptySpots.add(i);
-      }
-      if (emptySpots.isNotEmpty) {
-        emptySpots.shuffle();
-        setState(() {
-          board[emptySpots.first] = 'G';
-          goatsToPlace--;
-          if (goatsToPlace == 0) {
-            gamePhase = 'MOVE';
-            turn = 'TIGER';
-            message = 'All goats placed! Tiger's turn.';
-          } else {
-            turn = 'TIGER';
-            message = 'Goats left to place: $goatsToPlace';
-          }
-        });
-      }
-    } else if (gamePhase == 'MOVE' && turn == 'GOAT') {
-      // Bot moves goat based on difficulty
-      List<Map<String, int>> possibleMoves = [];
-      for (int i = 0; i < 25; i++) {
-        if (board[i] == 'G') {
-          for (int n in getNeighbors(i)) {
-            if (board[n] == null) {
-              possibleMoves.add({'from': i, 'to': n});
-            }
-          }
-        }
-      }
-
-      if (possibleMoves.isEmpty) return;
-
-      Map<String, int> chosenMove = possibleMoves.first;
-
-      if (widget.botDifficulty == 'Easy') {
-        possibleMoves.shuffle();
-        chosenMove = possibleMoves.first;
-      } else if (widget.botDifficulty == 'Medium') {
-        // Avoid moving next to tigers if possible, else random
-        possibleMoves.shuffle();
-        for (var move in possibleMoves) {
-          int dest = move['to']!;
-          bool nearTiger = getNeighbors(dest).any((n) => board[n] == 'T');
-          if (!nearTiger) {
-            chosenMove = move;
-            break;
-          }
-        }
-      } else {
-        // Hard: Strategic blocking & safety
-        possibleMoves.shuffle();
-        // Try to place goat adjacent to tiger to block it
-        for (var move in possibleMoves) {
-          int dest = move['to']!;
-          if (getNeighbors(dest).any((n) => board[n] == 'T')) {
-            chosenMove = move;
-            break;
-          }
-        }
-      }
-
-      setState(() {
-        board[chosenMove['to']!] = 'G';
-        board[chosenMove['from']!] = null;
-        endTurnAfterMove();
-      });
-    }
-  }
-
-  void _showEndDialog(String title) {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: Text(title, style: const TextStyle(color: Colors.brown)),
-        content: Text('Goats Eaten: $goatsEaten / 5'),
-        actions: [
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.brown),
-            onPressed: () {
-              Navigator.pop(context);
-              resetGame();
-            },
-            child: const Text('Play Again'),
-          ),
-        ],
-      ),
-    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.isVsBot ? 'Vs Bot (${widget.botDifficulty})' : '2 Player Mode'),
-        backgroundColor: Colors.brown[700],
-        foregroundColor: Colors.white,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: resetGame,
-            tooltip: 'Reset Game',
-          ),
-        ],
+        title: const Text("ବାଘ ଛେଳି (Bagha Bajari)"),
+        centerTitle: true,
       ),
       body: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          // Status Header Bar
-          Container(
-            padding: const EdgeInsets.all(12),
-            margin: const EdgeInsets.symmetric(horizontal: 16),
-            decoration: BoxDecoration(
-              color: Colors.brown[200],
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Column(
-              children: [
-                Text(
-                  message,
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.brown),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 6),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: [
-                    Text('Turn: ${turn == "TIGER" ? "🐅 Tiger" : "🐐 Goat"}',
-                        style: const TextStyle(fontWeight: FontWeight.bold)),
-                    Text('Goats Eaten: $goatsEaten/5',
-                        style: const TextStyle(fontWeight: FontWeight.bold)),
-                    if (gamePhase == 'PLACE_GOATS')
-                      Text('Left: $goatsToPlace', style: const TextStyle(fontWeight: FontWeight.bold)),
-                  ],
-                ),
-              ],
+          Padding(
+            padding: const EdgeInsets.all(12.0),
+            child: Text(
+              statusMessage,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
             ),
           ),
-          const SizedBox(height: 20),
-          
-          // Wooden Board UI Container
-          Center(
-            child: Container(
-              width: 350,
-              height: 350,
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: const Color(0xFFD2B48C), // Wooden tan color
-                border: Border.all(color: Colors.brown.shade900, width: 6),
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.brown.withOpacity(0.5),
-                    blurRadius: 10,
-                    spreadRadius: 2,
-                  )
-                ],
+          const SizedBox(height: 10),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: GridView.builder(
+                physics: const NeverScrollableScrollPhysics(),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 5,
+                  crossAxisSpacing: 8,
+                  mainAxisSpacing: 8,
+                ),
+                itemCount: 25,
+                itemBuilder: (context, index) {
+                  bool isSelected = index == selectedIndex;
+                  return GestureDetector(
+                    onTap: () => handleTap(index),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? Colors.yellowAccent
+                            : Colors.orange.shade100,
+                        border: Border.all(
+                            color: isSelected ? Colors.red : Colors.brown,
+                            width: 2),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Center(
+                        child: buildPieceWidget(board[index]),
+                      ),
+                    ),
+                  );
+                },
               ),
-              child: CustomPaint(
-                painter: BoardPainter(),
-                child: GridView.builder(
-                  physics: const NeverScrollableScrollPhysics(),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 5,
-                  ),
-                  itemCount: 25,
-                  itemBuilder: (context, index) {
-                    bool isSelected = selectedIndex == index;
-                    String? piece = board[index];
+            ),
+          ),
+          ElevatedButton.icon(
+            onPressed: resetGame,
+            icon: const Icon(Icons.refresh),
+            label: const Text("ନୂଆ ଖେଳ (Reset)"),
+          ),
+          const SizedBox(height: 20),
+        ],
+      ),
+    );
+  }
 
-                    return GestureDetector(
-                      onTap: () => handleCellTap(index),
-                      child: Container(
-                        margin: const EdgeInsets.all(4),
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: isSelected ? Colors.amber.shade300 : Colors.transparent,
-                        ),
-                        child: Center(
-                          child: piece == 'T'
-                              ? const CircleAvatar(
-                                  backgroundColor: Colors.orangeAccent,
-                                  child: Text('🐅', style: TextStyle(fontSize: 20)),
-                                )
-                              : piece == 'G'
-                                  ? const CircleAvatar(
-                                      backgroundColor: Colors.white70,
-                                      child: Text('🐐', style: TextStyle(fontSize: 18)),
-                                    )
-                                  : Container(
-                                      width: 10,
-                                      height: 10,
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        color: Colors.brown[900],
-                          
+  Widget buildPieceWidget(Piece piece) {
+    if (piece == Piece.tiger) {
+      return const Text("🐅", style: TextStyle(fontSize: 32));
+    } else if (piece == Piece.goat) {
+      return const Text("🐐", style: TextStyle(fontSize: 32));
+    }
+    return const SizedBox();
+  }
+}
